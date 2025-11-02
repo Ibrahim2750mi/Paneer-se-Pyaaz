@@ -1,11 +1,12 @@
 import arcade
 import random
 import math
+from math import sin, cos, pi
 
 # Constants
 SCREEN_WIDTH = 1280
 SCREEN_HEIGHT = 720
-SCREEN_TITLE = "Procedural Forest Terrain"
+SCREEN_TITLE = "Procedural Forest Terrain - Infinite Runner"
 
 # Tile settings
 TILE_WIDTH = 128
@@ -15,7 +16,8 @@ TILE_HEIGHT = 64
 CAMERA_SPEED = 10
 
 # Character settings
-CHARACTER_SPEED = 6
+CHARACTER_SPEED = 8  # Constant forward speed
+TURN_SPEED = 0.1  # How fast the character rotates
 CHARACTER_SCALE = 1.0
 
 # Chunk settings
@@ -30,6 +32,58 @@ LAYER_NAME_GROUND = "Ground"
 LAYER_NAME_OBJECTS = "Objects"
 LAYER_NAME_WALLS = "Walls"
 LAYER_NAME_CHARACTERS = "Characters"
+
+
+class QuantumState:
+    """Minimal quantum simulator for terrain"""
+
+    def __init__(self, x, y):
+        self.phase = (x * 0.1234 + y * 0.4321 + sin(x * 0.1) * cos(y * 0.1)) % (2 * pi)
+
+    def hadamard(self):
+        """Create superposition"""
+        self.phase = (self.phase + pi / 4) % (2 * pi)
+
+    def rotate(self, angle):
+        """Rotate phase"""
+        self.phase = (self.phase + angle) % (2 * pi)
+
+    def measure(self):
+        """Get probability (0 to 1)"""
+        return (cos(self.phase) + 1) / 2
+
+
+def quantum_terrain(tile_x, tile_y):
+    """Generate terrain using quantum states"""
+    q = QuantumState(tile_x, tile_y)
+    q.hadamard()
+    angle = (tile_x * 0.314 + tile_y * 0.271 + sin(tile_x * 0.05) * 3.14) % (2 * pi)
+    q.rotate(angle)
+    q.hadamard()
+    q.rotate((tile_x * tile_y * 0.001) % (2 * pi))
+    density = q.measure()
+
+    q2 = QuantumState(tile_y, tile_x)
+    q2.hadamard()
+    q2.rotate(tile_x * 0.1)
+    variation = q2.measure()
+
+    combined = (density + variation * 0.5) / 1.5
+
+    if combined < 0.65:
+        return None
+    elif combined < 0.68:
+        return 'tree_thin_fall'
+    elif combined < 0.70:
+        return 'tree_default_fall'
+    elif combined < 0.72:
+        return 'tree_oak_fall'
+    elif combined < 0.75:
+        return 'stone_large'
+    elif combined < 0.77:
+        return 'log'
+    else:
+        return 'stone_tall' if (tile_x + tile_y) % 3 == 0 else 'bush_small'
 
 
 class Character(arcade.Sprite):
@@ -64,7 +118,6 @@ class Character(arcade.Sprite):
                     except:
                         pass
             elif character_folder == "assets/characters/character2_run":
-                # Character 2 uses character_X-Y.png format
                 patterns = [
                     f"{character_folder}/character_1-4.png",
                     f"{character_folder}/character_2-3.png",
@@ -91,32 +144,30 @@ class Character(arcade.Sprite):
             self.run_textures = self.idle_textures
 
         # Set initial texture
-        self.texture = self.idle_textures[0] if self.idle_textures else self.run_textures[0]
+        self.texture = self.run_textures[0] if self.run_textures else self.idle_textures[0]
         self.scale = CHARACTER_SCALE
 
         # Animation state
         self.current_frame = 0
         self.frame_counter = 0
-        self.is_moving = False
+
+        # Movement direction (in radians)
+        self.direction = 0  # 0 = right, pi/2 = up, pi = left, 3pi/2 = down
 
         # Isometric position tracking
         self.iso_x = 0
         self.iso_y = 0
 
-    def update_animation(self, delta_time):
-        """Update character animation"""
+    def update_animation(self, delta_time=1 / 60):
+        """Update character animation - always running"""
         self.frame_counter += 1
 
-        # Change frame every 8 updates
-        if self.frame_counter >= 8:
+        # Change frame every 6 updates (faster animation for runner feel)
+        if self.frame_counter >= 6:
             self.frame_counter = 0
-
-            if self.is_moving and self.run_textures:
+            if self.run_textures:
                 self.current_frame = (self.current_frame + 1) % len(self.run_textures)
                 self.texture = self.run_textures[self.current_frame]
-            elif self.idle_textures:
-                self.current_frame = (self.current_frame + 1) % len(self.idle_textures)
-                self.texture = self.idle_textures[self.current_frame]
 
 
 class ProceduralForestTerrain(arcade.Window):
@@ -143,13 +194,15 @@ class ProceduralForestTerrain(arcade.Window):
         # Physics engine
         self.physics_engine = None
 
-        # Movement keys
-        self.keys_pressed = {
-            'up': False,
-            'down': False,
-            'left': False,
-            'right': False
-        }
+        # Turn direction: -1 for left, 1 for right, 0 for straight
+        self.turn_direction = 0
+
+        # Terrain generation mode: 'random' or 'quantum'
+        self.terrain_mode = 'quantum'
+
+        # Game state
+        self.game_over = False
+        self.distance_traveled = 0
 
     def load_textures(self):
         """Load all forest-themed textures"""
@@ -186,7 +239,7 @@ class ProceduralForestTerrain(arcade.Window):
         self.scene = arcade.Scene()
 
         # Add sprite lists for different layers
-        self.scene.add_sprite_list(LAYER_NAME_GROUND)
+        self.scene.add_sprite_list(LAYER_NAME_GROUND, use_spatial_hash=True)
         self.scene.add_sprite_list(LAYER_NAME_OBJECTS, use_spatial_hash=True)
         self.scene.add_sprite_list(LAYER_NAME_WALLS, use_spatial_hash=True)
         self.scene.add_sprite_list(LAYER_NAME_CHARACTERS)
@@ -197,6 +250,7 @@ class ProceduralForestTerrain(arcade.Window):
         self.character.center_y = SCREEN_HEIGHT / 2
         self.character.iso_x = 0
         self.character.iso_y = 0
+        self.character.direction = pi / 4  # Start moving diagonally up-right
 
         # Add character to scene
         self.scene.add_sprite(LAYER_NAME_CHARACTERS, self.character)
@@ -209,6 +263,10 @@ class ProceduralForestTerrain(arcade.Window):
             self.character,
             self.scene[LAYER_NAME_WALLS]
         )
+
+        # Reset game state
+        self.game_over = False
+        self.distance_traveled = 0
 
     def iso_to_screen(self, iso_x, iso_y):
         """Convert isometric grid coordinates to screen coordinates"""
@@ -242,14 +300,14 @@ class ProceduralForestTerrain(arcade.Window):
         # Trees need extended hitboxes towards the bottom (where trunk appears visually)
         if 'tree' in element:
             return [
-                (-hitbox_width * 0.5, -hitbox_height * 3.0),
-                (hitbox_width * 0.5, -hitbox_height * 3.0),
-                (hitbox_width * 0.5, hitbox_height * 0.8),
-                (-hitbox_width * 0.5, hitbox_height * 0.8)
+                (-hitbox_width * 0.45, -hitbox_height * 3.0),
+                (hitbox_width * 0.45, -hitbox_height * 3.0),
+                (hitbox_width * 0.45, hitbox_height * 0.8),
+                (-hitbox_width * 0.45, hitbox_height * 0.8)
             ]
 
         # Large rocks get slightly extended hitbox
-        elif element == 'rock_large':
+        elif element == 'stone_large':
             return [
                 (-hitbox_width * 0.8, -hitbox_height * 1.2),
                 (hitbox_width * 0.8, -hitbox_height * 1.2),
@@ -266,7 +324,7 @@ class ProceduralForestTerrain(arcade.Window):
                 (-hitbox_width * 0.9, hitbox_height * 0.5)
             ]
 
-        # Large bushes
+        # Stone tall
         elif element == 'stone_tall':
             return [
                 (-hitbox_width * 0.6, -hitbox_height * 0.8),
@@ -295,6 +353,11 @@ class ProceduralForestTerrain(arcade.Window):
 
     def generate_terrain_element(self, tile_x, tile_y, rng):
         """Determine what terrain element to place at this position"""
+        # Use quantum terrain if enabled
+        if self.terrain_mode == 'quantum':
+            return quantum_terrain(tile_x, tile_y)
+
+        # Otherwise use random generation
         noise = rng.random()
 
         if noise < 0.35:
@@ -394,14 +457,6 @@ class ProceduralForestTerrain(arcade.Window):
                 chunks_to_remove.append(chunk_pos)
 
         for chunk_pos in chunks_to_remove:
-            chunk_data = self.chunks[chunk_pos]
-            # Remove sprites from scene
-            for sprite in chunk_data['ground']:
-                sprite.remove_from_sprite_lists()
-            for sprite in chunk_data['objects']:
-                sprite.remove_from_sprite_lists()
-            for sprite in chunk_data['walls']:
-                sprite.remove_from_sprite_lists()
             del self.chunks[chunk_pos]
 
         # Create new chunks
@@ -410,67 +465,78 @@ class ProceduralForestTerrain(arcade.Window):
                 self.chunks[chunk_pos] = self.create_chunk(*chunk_pos)
 
     def on_key_press(self, key, modifiers):
-        """Handle key press"""
-        if key == arcade.key.UP or key == arcade.key.W:
-            self.keys_pressed['up'] = True
-        elif key == arcade.key.DOWN or key == arcade.key.S:
-            self.keys_pressed['down'] = True
-        elif key == arcade.key.LEFT or key == arcade.key.A:
-            self.keys_pressed['left'] = True
+        """Handle key press - only turn left or right"""
+        if self.game_over:
+            if key == arcade.key.R:
+                self.setup()
+            return
+
+        if key == arcade.key.LEFT or key == arcade.key.A:
+            self.turn_direction = -1
         elif key == arcade.key.RIGHT or key == arcade.key.D:
-            self.keys_pressed['right'] = True
+            self.turn_direction = 1
+        elif key == arcade.key.Q:
+            # Toggle terrain generation mode
+            if self.terrain_mode == 'quantum':
+                self.terrain_mode = 'random'
+                print("Switched to Random Terrain Generation")
+            else:
+                self.terrain_mode = 'quantum'
+                print("Switched to Quantum Terrain Generation")
 
     def on_key_release(self, key, modifiers):
         """Handle key release"""
-        if key == arcade.key.UP or key == arcade.key.W:
-            self.keys_pressed['up'] = False
-        elif key == arcade.key.DOWN or key == arcade.key.S:
-            self.keys_pressed['down'] = False
-        elif key == arcade.key.LEFT or key == arcade.key.A:
-            self.keys_pressed['left'] = False
+        if key == arcade.key.LEFT or key == arcade.key.A:
+            if self.turn_direction == -1:
+                self.turn_direction = 0
         elif key == arcade.key.RIGHT or key == arcade.key.D:
-            self.keys_pressed['right'] = False
+            if self.turn_direction == 1:
+                self.turn_direction = 0
 
     def on_update(self, delta_time):
         """Update camera position and character"""
-        moved = False
+        if self.game_over:
+            return
 
-        # Set character velocity based on keys
-        self.character.change_x = 0
-        self.character.change_y = 0
+        # Update character direction based on turn input
+        if self.turn_direction != 0:
+            self.character.direction += self.turn_direction * TURN_SPEED
 
-        if self.keys_pressed['up']:
-            self.character.change_y = CHARACTER_SPEED
-            moved = True
-        if self.keys_pressed['down']:
-            self.character.change_y = -CHARACTER_SPEED
-            moved = True
-        if self.keys_pressed['left']:
-            self.character.change_x = -CHARACTER_SPEED
-            moved = True
-        if self.keys_pressed['right']:
-            self.character.change_x = CHARACTER_SPEED
-            moved = True
+        # Always move forward in current direction
+        self.character.change_x = math.cos(self.character.direction) * CHARACTER_SPEED
+        self.character.change_y = math.sin(self.character.direction) * CHARACTER_SPEED
 
-        # Store old position for camera calculation
+        # Store old position
         old_x = self.character.center_x
         old_y = self.character.center_y
 
         # Update physics for player
         self.physics_engine.update()
 
+        # Check if character hit something (didn't move as expected)
+        expected_x = old_x + self.character.change_x
+        expected_y = old_y + self.character.change_y
+        actual_move_x = self.character.center_x - old_x
+        actual_move_y = self.character.center_y - old_y
+
+        # If movement was blocked significantly, game over
+        if abs(actual_move_x) < abs(self.character.change_x) * 0.5 or \
+                abs(actual_move_y) < abs(self.character.change_y) * 0.5:
+            self.game_over = True
+            print(f"Game Over! Distance traveled: {int(self.distance_traveled)}")
+            return
+
         # Calculate movement delta for camera
         move_x = self.character.center_x - old_x
         move_y = self.character.center_y - old_y
 
-        if abs(move_x) > 0.1 or abs(move_y) > 0.1:
-            # Update camera to follow character
-            current_pos = self.camera.position
-            self.camera.position = (current_pos[0] + move_x, current_pos[1] + move_y)
-            self.update_chunks()
-            self.character.is_moving = True
-        else:
-            self.character.is_moving = moved
+        # Update distance traveled
+        self.distance_traveled += math.sqrt(move_x ** 2 + move_y ** 2)
+
+        # Update camera to follow character
+        current_pos = self.camera.position
+        self.camera.position = (current_pos[0] + move_x, current_pos[1] + move_y)
+        self.update_chunks()
 
         # Update animations
         self.character.update_animation(delta_time)
@@ -481,22 +547,62 @@ class ProceduralForestTerrain(arcade.Window):
 
         self.camera.use()
 
-        # Draw ground layer
+        # Draw ground layer (no sorting needed)
         self.scene[LAYER_NAME_GROUND].draw()
 
-        # For isometric rendering, we need to sort objects and character by Y position
-        # Collect all sprites that need Y-sorting
-        all_objects = []
-        all_objects.extend(self.scene[LAYER_NAME_OBJECTS])
-        all_objects.extend(self.scene[LAYER_NAME_WALLS])
-        all_objects.extend(self.scene[LAYER_NAME_CHARACTERS])
+        # Draw static objects that don't need frequent re-sorting
+        self.scene[LAYER_NAME_OBJECTS].draw()
 
-        # Sort by Y position (lower Y = drawn first = appears behind)
-        all_objects.sort(key=lambda s: -s.center_y)
+        # Only sort walls and characters for proper depth
+        dynamic_objects = []
+        dynamic_objects.extend(self.scene[LAYER_NAME_WALLS])
+        dynamic_objects.extend(self.scene[LAYER_NAME_CHARACTERS])
 
-        spritelist = arcade.sprite_list.SpriteList(use_spatial_hash=True)
-        spritelist.extend(all_objects)
-        spritelist.draw()
+        # Sort by Y position
+        dynamic_objects.sort(key=lambda s: -s.center_y)
+
+        sprite_list = arcade.SpriteList(use_spatial_hash=True)
+        sprite_list.extend(dynamic_objects)
+        sprite_list.draw()
+
+        # Draw UI (distance and instructions)
+        arcade.camera.Camera2D().use()  # Switch to screen coordinates
+
+        # Display distance
+        arcade.draw_text(
+            f"Distance: {int(self.distance_traveled)}",
+            10, SCREEN_HEIGHT - 30,
+            arcade.color.WHITE, 20,
+            bold=True
+        )
+
+        # Display controls
+        arcade.draw_text(
+            "LEFT/A: Turn Left  |  RIGHT/D: Turn Right  |  Q: Toggle Terrain Mode",
+            10, 10,
+            arcade.color.WHITE, 14
+        )
+
+        # Game over message
+        if self.game_over:
+            arcade.draw_text(
+                "GAME OVER!",
+                SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 30,
+                arcade.color.RED, 60,
+                anchor_x="center", bold=True
+            )
+            arcade.draw_text(
+                f"Final Distance: {int(self.distance_traveled)}",
+                SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 30,
+                arcade.color.WHITE, 30,
+                anchor_x="center", bold=True
+            )
+            arcade.draw_text(
+                "Press R to Restart",
+                SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 70,
+                arcade.color.WHITE, 24,
+                anchor_x="center"
+            )
 
 
 def main():
