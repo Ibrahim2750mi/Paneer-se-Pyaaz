@@ -1,3 +1,5 @@
+import time
+
 import arcade
 import random
 import math
@@ -47,6 +49,10 @@ LAYER_NAME_CHARACTERS = "Characters"
 # Coin settings
 COIN_VALUE = 10  # Points per coin collected
 COIN_SPAWN_CHANCE = 0.15  # Probability of coin spawning per tile
+
+MAX_HEALTH = 100
+HEALTH_PENALTY = 20  # how much health lost per collision
+
 
 
 class QuantumState:
@@ -383,6 +389,22 @@ class ProceduralForestTerrain(arcade.Window):
         self.quantum_energy = MAX_QUANTUM_ENERGY
         self.wave_particles = []  # Visual effect particles
 
+        # Text objects for UI
+        self.score_text = None
+        self.displacement_text = None
+        self.energy_label = None
+        self.collision_text = None
+        self.wave_text = None
+        self.controls_text = None
+        self.game_over_text = None
+        self.final_score_text = None
+        self.restart_text = None
+
+        self.health_label = None
+
+        self.health = MAX_HEALTH
+        self.last_damage_time = 0
+
     def load_textures(self):
         """Load all forest-themed textures"""
         try:
@@ -459,6 +481,69 @@ class ProceduralForestTerrain(arcade.Window):
         self.wave_mode_active = False
         self.quantum_energy = MAX_QUANTUM_ENERGY
         self.wave_particles = []
+
+        self.score_text = arcade.Text(
+            "Score: 0", 10, SCREEN_HEIGHT - 30,
+            arcade.color.WHITE, 20, bold=True
+        )
+
+        self.displacement_text = arcade.Text(
+            "Displacement: 0", 10, SCREEN_HEIGHT - 60,
+            arcade.color.LIGHT_GRAY, 16
+        )
+
+        self.energy_label = arcade.Text(
+            f"Quantum Energy: {MAX_QUANTUM_ENERGY}%",
+            10, SCREEN_HEIGHT - 140,
+            arcade.color.CYAN, 14, bold=True
+        )
+
+        self.collision_text = arcade.Text(
+            f"COLLISION! -{COLLISION_PENALTY}",
+            SCREEN_WIDTH / 2, SCREEN_HEIGHT - 40,
+            arcade.color.RED, 24,
+            anchor_x="center", bold=True
+        )
+
+        self.wave_text = arcade.Text(
+            "⚛ WAVE MODE ACTIVE ⚛",
+            SCREEN_WIDTH / 2, SCREEN_HEIGHT - 80,
+            arcade.color.CYAN, 20,
+            anchor_x="center", bold=True
+        )
+
+        self.controls_text = arcade.Text(
+            "LEFT/A: Turn Left  |  RIGHT/D: Turn Right  |  HOLD W: Wave Mode  |  Q: Toggle Terrain",
+            10, 10,
+            arcade.color.WHITE, 14
+        )
+
+        self.game_over_text = arcade.Text(
+            "GAME OVER!",
+            SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 30,
+            arcade.color.RED, 60,
+            anchor_x="center", bold=True
+        )
+
+        self.final_score_text = arcade.Text(
+            "Final Score: 0",
+            SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 30,
+            arcade.color.WHITE, 30,
+            anchor_x="center", bold=True
+        )
+
+        self.restart_text = arcade.Text(
+            "Press R to Restart",
+            SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 70,
+            arcade.color.WHITE, 24,
+            anchor_x="center"
+        )
+
+        self.health_label = arcade.Text(
+            f"Health: {MAX_HEALTH}%",
+            10, SCREEN_HEIGHT - 170,
+            arcade.color.LIGHT_GREEN, 14, bold=True
+        )
 
     def generate_terrain_element(self, tile_x, tile_y, rng):
         """Determine what terrain element to place at this position"""
@@ -640,6 +725,16 @@ class ProceduralForestTerrain(arcade.Window):
         for particle in self.wave_particles:
             particle['life'] -= 1
 
+    def take_damage(self, amount: int):
+        """Reduce health, trigger Game Over if needed."""
+        self.health = max(0, self.health - amount)
+        self.last_damage_time = time.time()
+
+        if self.health <= 0:
+            self.game_over = True
+            self.wave_mode_active = False
+            arcade.play_sound(self.game_over_sound) if hasattr(self, "game_over_sound") else None
+
     def on_update(self, delta_time):
         """Update camera position and character"""
         if self.game_over:
@@ -696,7 +791,7 @@ class ProceduralForestTerrain(arcade.Window):
                 if self.collision_cooldown == 0:
                     self.penalty -= COLLISION_PENALTY
                     self.collision_cooldown = COLLISION_COOLDOWN
-    
+                self.take_damage(HEALTH_PENALTY)
 
         # Calculate movement delta for camera
         move_x = self.character.center_x - old_x
@@ -764,20 +859,6 @@ class ProceduralForestTerrain(arcade.Window):
             (self.character.center_y - self.start_y) ** 2
         )
 
-        # Display score and displacement
-        arcade.draw_text(
-            f"Score: {self.score}",
-            10, SCREEN_HEIGHT - 30,
-            arcade.color.WHITE, 20,
-            bold=True
-        )
-
-        arcade.draw_text(
-            f"Displacement: {int(displacement)}",
-            10, SCREEN_HEIGHT - 60,
-            arcade.color.LIGHT_GRAY, 16
-        )
-
         # Draw quantum energy bar
         bar_width = 200
         bar_height = 20
@@ -786,7 +867,7 @@ class ProceduralForestTerrain(arcade.Window):
 
         # Background
         arcade.draw_lbwh_rectangle_filled(
-            bar_x + bar_width / 2, bar_y + bar_height / 2,
+            bar_x, bar_y + bar_height / 2,
             bar_width, bar_height,
             arcade.color.DARK_GRAY
         )
@@ -795,72 +876,51 @@ class ProceduralForestTerrain(arcade.Window):
         energy_width = (self.quantum_energy / MAX_QUANTUM_ENERGY) * bar_width
         energy_color = arcade.color.CYAN if self.quantum_energy > 20 else arcade.color.RED
         arcade.draw_lbwh_rectangle_filled(
-            bar_x + bar_width / 2, bar_y + bar_height / 2,
+            bar_x, bar_y + bar_height / 2,
             energy_width, bar_height,
             energy_color
         )
 
         # Border
         arcade.draw_lbwh_rectangle_outline(
-            bar_x + bar_width / 2, bar_y + bar_height / 2,
+            bar_x, bar_y + bar_height / 2,
             bar_width, bar_height,
             arcade.color.WHITE, 2
         )
 
-        # Label
-        arcade.draw_text(
-            f"Quantum Energy: {int(self.quantum_energy)}%",
-            bar_x, bar_y - 20,
-            arcade.color.CYAN if not self.wave_mode_active else arcade.color.YELLOW,
-            14,
-            bold=True
-        )
+        # Update dynamic UI text
+        self.score_text.text = f"Score: {self.score}"
+        self.displacement_text.text = f"Displacement: {int(math.sqrt((self.character.center_x - self.start_x) ** 2 + (self.character.center_y - self.start_y) ** 2))}"
+        self.energy_label.text = f"Quantum Energy: {int(self.quantum_energy)}%"
+        self.energy_label.color = arcade.color.YELLOW if self.wave_mode_active else arcade.color.CYAN
 
-        # Display collision warning if in cooldown
+        # Health text
+        self.health_label.text = f"Health: {int(self.health)}%"
+        # Flash red when hurt
+        if time.time() - self.last_damage_time < 0.3:
+            self.health_label.color = arcade.color.RED
+        else:
+            self.health_label.color = arcade.color.LIGHT_GREEN
+        self.health_label.draw()
+
+        # Draw text objects
+        self.score_text.draw()
+        self.displacement_text.draw()
+        self.energy_label.draw()
+        self.controls_text.draw()
+
+        # Conditional UI
         if self.collision_cooldown > 0:
-            arcade.draw_text(
-                f"COLLISION! -{COLLISION_PENALTY}",
-                SCREEN_WIDTH / 2, SCREEN_HEIGHT - 40,
-                arcade.color.RED, 24,
-                anchor_x="center", bold=True
-            )
+            self.collision_text.draw()
 
-        # Display wave mode indicator
         if self.wave_mode_active:
-            arcade.draw_text(
-                "⚛ WAVE MODE ACTIVE ⚛",
-                SCREEN_WIDTH / 2, SCREEN_HEIGHT - 80,
-                arcade.color.CYAN, 20,
-                anchor_x="center", bold=True
-            )
+            self.wave_text.draw()
 
-        # Display controls
-        arcade.draw_text(
-            "LEFT/A: Turn Left  |  RIGHT/D: Turn Right  |  HOLD W: Wave Mode  |  Q: Toggle Terrain",
-            10, 10,
-            arcade.color.WHITE, 14
-        )
-
-        # Game over message (if implemented)
         if self.game_over:
-            arcade.draw_text(
-                "GAME OVER!",
-                SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 30,
-                arcade.color.RED, 60,
-                anchor_x="center", bold=True
-            )
-            arcade.draw_text(
-                f"Final Score: {self.score}",
-                SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 30,
-                arcade.color.WHITE, 30,
-                anchor_x="center", bold=True
-            )
-            arcade.draw_text(
-                "Press R to Restart",
-                SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 70,
-                arcade.color.WHITE, 24,
-                anchor_x="center"
-            )
+            self.final_score_text.text = f"Final Score: {self.score}"
+            self.game_over_text.draw()
+            self.final_score_text.draw()
+            self.restart_text.draw()
 
 
 def main():
