@@ -1,7 +1,7 @@
 # QCG-Hackathon
 Mam: Infinite Quantum Terrain Runner Mam is an isometric, infinite terrain exploration and runner game that fuses quantum computing concepts with engaging, procedurally generated gameplay. Powered by quantum algorithms, Mam offers unpredictably diverse worlds, innovative puzzle challenges, and a gaming experience that classical systems can't replicate.
 
-🌍 Core Concept Mam delivers an endless isometric world built using quantum-enhanced procedural generation. Players journey through ever-expanding terrain, collecting resources, dodging obstacles, and solving mini-puzzles—all dynamically crafted using quantum randomness and search algorithms. Each player's experience is truly unique and irreproducible by classical means.
+🌍 Core Concept Mam delivers an endless isometric world built using quantum-enhanced procedural generation. Players journey through ever-expanding terrain, collecting resources, dodging obstacles crafted using quantum randomness and search algorithms. Each player's experience is truly unique and irreproducible by classical means.
 
 🛠️ Key Features Quantum-Driven Terrain Generation
 
@@ -18,8 +18,6 @@ Automatic Forward Movement: Players move forward through an infinite isometric w
 Quantum Decisions: Every obstacle, enemy, or reward is placed using quantum-generated parameters for unmatched unpredictability.
 
 Quantum-Inspired Puzzles & Challenges
-
-Embedded Mini-Games: Solve puzzles like Lights Out, mini-Sudoku, or quantum logic gates integrated into the terrain.
 
 Quantum Phenomena: Engage with puzzles that use superposition, entanglement, and decoherence to create new gameplay twists (e.g., rules change unexpectedly, or solutions collapse from multiple possibilities).
 
