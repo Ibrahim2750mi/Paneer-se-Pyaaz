@@ -1,445 +1,15 @@
+"""Main game loop and window management."""
 import time
-
-import arcade
-import random
 import math
-from math import sin, cos, pi
-
-# Constants
-SCREEN_WIDTH = 1280
-SCREEN_HEIGHT = 720
-SCREEN_TITLE = "Procedural Forest Terrain - Infinite Runner"
-
-# Tile settings
-TILE_WIDTH = 128
-TILE_HEIGHT = 64
-
-# Camera movement speed
-CAMERA_SPEED = 10
-
-# Character settings
-CHARACTER_SPEED = 8  # Constant forward speed
-TURN_SPEED = 0.15  # How fast the character rotates
-CHARACTER_SCALE = 1.0
-
-# Chunk settings
-CHUNK_SIZE = 16
-RENDER_DISTANCE = 4
-
-# Master seed for reproducible terrain
-MASTER_SEED = 12345
-
-# Game settings
-COLLISION_PENALTY = 50  # Points deducted per collision
-COLLISION_COOLDOWN =  15  # Frames before another collision can be registered
-
-# Quantum wave mode settings
-MAX_QUANTUM_ENERGY = 100
-QUANTUM_DRAIN_RATE = 2.5 # Energy per frame while in wave mode
-QUANTUM_RECHARGE_RATE = 0.1  # Energy per frame while not in wave mode
-WAVE_MODE_ALPHA = 128  # Transparency level in wave mode (0-255)
-
-# Scene layer names
-LAYER_NAME_GROUND = "Ground"
-LAYER_NAME_OBJECTS = "Objects"
-LAYER_NAME_WALLS = "Walls"
-LAYER_NAME_COINS = "Coins"
-LAYER_NAME_CHARACTERS = "Characters"
-
-# Coin settings
-COIN_VALUE = 100  # Points per coin collected
-COIN_SPAWN_CHANCE = 0.15  # Probability of coin spawning per tile
-
-MAX_HEALTH = 100
-HEALTH_PENALTY = 2  # how much health lost per collision
-
-
-
-class QuantumState:
-    """
-    Minimal quantum-inspired state for procedural terrain.
-    Simulates a 1-qubit system where the phase encodes variation.
-    """
-
-    def __init__(self, x: float, y: float):
-        # Initialize phase based on world coordinates
-        # Using both linear and trigonometric mixing for pseudo-randomness
-        self.phase = (x * 0.1234 + y * 0.4321 + sin(x * 0.1) * cos(y * 0.1)) % (2 * pi)
-
-    def hadamard(self):
-        """
-        Simulates a Hadamard gate — creates superposition by mixing base state.
-        This adds variability to the phase space.
-        """
-        self.phase = (self.phase + pi / 4 + sin(self.phase)) % (2 * pi)
-
-    def rotate(self, angle: float):
-        """
-        Rotate phase (Z-axis rotation) — equivalent to an RZ gate.
-        Only affects the *phase*, not amplitude.
-        """
-        self.phase = (self.phase + angle) % (2 * pi)
-
-    def ry(self, theta: float):
-        """
-        Rotate around Y-axis — modifies both phase and implied probability amplitude.
-        Produces stronger variations than rotate().
-        """
-        # Instead of pure sine, modulate with current phase for smoother but chaotic transitions
-        delta = sin(theta) * cos(self.phase)
-        self.phase = (self.phase + delta * pi) % (2 * pi)
-
-    def phase_shift(self, phi: float):
-        """
-        Apply a fixed phase offset — useful for biasing certain regions.
-        """
-        self.phase = (self.phase + phi) % (2 * pi)
-
-    def measure(self) -> float:
-        """
-        Return a pseudo 'probability' (0–1) derived from the phase.
-        This determines how 'dense' or 'active' a terrain tile is.
-        """
-        # Cosine gives smooth oscillation; squaring would sharpen contrast
-        return (cos(self.phase) + 1) / 2
-
-def quantum_terrain(tile_x, tile_y):
-    """Generate terrain using quantum states"""
-    q = QuantumState(tile_x, tile_y)
-
-    # Step 1: Create superposition
-    q.hadamard()
-
-    # Step 2: Introduce coordinate-dependent rotation (organic bias)
-    theta = (sin(tile_x * 0.15) + cos(tile_y * 0.13)) * pi / 2
-    q.ry(theta)
-
-    # Step 3: Local interference
-    phi = ((tile_x * 0.23 + tile_y * 0.37) % (2 * pi)) * 0.5
-    q.phase_shift(phi)
-
-    # Step 4: Another layer of Y-rotation for pattern complexity
-    q.ry((tile_x * tile_y * 0.002) % (pi / 2))
-
-    # Step 5: Measurement
-    density = q.measure()
-
-    # Optional: smooth second state for variation
-    q2 = QuantumState(tile_y, tile_x)
-    q2.hadamard()
-    q2.ry(sin(tile_y * 0.21) * pi / 3)
-    variation = q2.measure()
-
-    combined = (density + 0.6 * variation) / 1.6
-
-    if combined < 0.75:
-        return None
-    elif combined < 0.78:
-        return 'tree_thin_fall'
-    elif combined < 0.80:
-        return 'tree_fat_fall'
-    elif combined < 0.82:
-        return 'tree_oak_fall'
-    elif combined < 0.85:
-        return 'stone_large'
-    elif combined < 0.87:
-        return 'log'
-    else:
-        return 'stone_tall' if (tile_x + tile_y) % 3 == 0 else 'bush_small'
-
-
-def quantum_terrain_phase(tile_x, tile_y):
-    """Generate terrain using standard quantum phase logic."""
-    q = QuantumState(tile_x, tile_y)
-    q.hadamard()
-    q.rotate(tile_x * 0.1)
-    q.hadamard()
-    density = q.measure()
-    return terrain_type_from_density(density)
-
-def quantum_terrain_ry(tile_x, tile_y):
-    """Generate terrain using an RY quantum gate instead of rotation."""
-    q = QuantumState(tile_x, tile_y)
-    q.hadamard()
-    q.ry(tile_x * 0.3 + tile_y * 0.2)
-    q.hadamard()
-    q.ry(tile_y * 0.15)
-    density = q.measure()
-    return terrain_type_from_density(density)
-
-
-
-def hybrid_terrain(tile_x, tile_y, wave_mode):
-    """Mix terrain types between phase-based and RY-based depending on state."""
-    # During normal mode, use phase terrain mostly
-    if not wave_mode:
-        if (tile_x + tile_y) % 7 < 5:
-            return quantum_terrain_phase(tile_x, tile_y)
-        else:
-            return quantum_terrain_ry(tile_x, tile_y)
-    else:
-        # In wave mode, lean heavier into RY terrain for more chaotic generation
-        if (tile_x * tile_y) % 5 < 3:
-            return quantum_terrain_ry(tile_x, tile_y)
-        else:
-            return quantum_terrain_phase(tile_x, tile_y)
-
-def terrain_type_from_density(d):
-    if d < 0.35:
-        return None
-    elif d < 0.45:
-        return 'tree_thin'
-    elif d < 0.60:
-        return 'tree_oak_fall'
-    elif d < 0.65:
-        return 'tree_fat_fall'
-    elif d < 0.70:
-        return 'stone_large'
-    elif d < 0.75:
-        return 'stone_tall'
-    elif d < 0.80:
-        return 'log'
-    else:
-        return 'bush_small'
-
-
-class Character(arcade.Sprite):
-    """Character with animation support"""
-
-    def __init__(self):
-        super().__init__()
-
-        # Load character textures
-        self.idle_textures = []
-        self.run_textures = []
-        self.run_left_textures = []
-        self.run_right_textures = []
-
-        try:
-            # Load idle animations (try character2_idle folder)
-            idle_patterns = [
-                "assets/characters/character2_idle/character_1-5.png",
-                "assets/characters/character2_idle/character_2-4.png",
-                "assets/characters/character2_idle/character_3-4.png",
-                "assets/characters/character2_idle/character_4-4.png",
-                "assets/characters/character2_idle/character_5-4.png",
-                "assets/characters/character2_idle/character_6-4.png",
-                "assets/characters/character2_idle/character_7-4.png",
-                "assets/characters/character2_idle/character_8-5.png"
-            ]
-            for pattern in idle_patterns:
-                texture = arcade.load_texture(pattern)
-                self.idle_textures.append(texture)
-
-            # Load forward run animations
-            run_patterns = [
-                "assets/characters/character2_run/character_1-4.png",
-                "assets/characters/character2_run/character_2-3.png",
-                "assets/characters/character2_run/character_3-3.png",
-                "assets/characters/character2_run/character_4-3.png",
-                "assets/characters/character2_run/character_5-3.png",
-                "assets/characters/character2_run/character_6-3.png",
-                "assets/characters/character2_run/character_7-3.png",
-                "assets/characters/character2_run/character_8-4.png"
-            ]
-            for pattern in run_patterns:
-                try:
-                    texture = arcade.load_texture(pattern)
-                    self.run_textures.append(texture)
-                except Exception as e:
-                    print(f"Could not load {pattern}: {e}")
-
-            # Load left run animations
-            left_patterns = [
-                "assets/characters/character2_left/character_1-9.png",
-                "assets/characters/character2_left/character_2-8.png",
-                "assets/characters/character2_left/character_3-8.png",
-                "assets/characters/character2_left/character_4-8.png",
-                "assets/characters/character2_left/character_5-8.png",
-                "assets/characters/character2_left/character_6-8.png",
-                "assets/characters/character2_left/character_7-8.png",
-                "assets/characters/character2_left/character_8-9.png"
-            ]
-            for pattern in left_patterns:
-                try:
-                    texture = arcade.load_texture(pattern)
-                    self.run_left_textures.append(texture)
-                except Exception as e:
-                    print(f"Could not load {pattern}: {e}")
-
-            # Load right run animations
-            right_patterns = [
-                "assets/characters/character2_right/character_1-8.png",
-                "assets/characters/character2_right/character_2-7.png",
-                "assets/characters/character2_right/character_3-7.png",
-                "assets/characters/character2_right/character_4-7.png",
-                "assets/characters/character2_right/character_5-7.png",
-                "assets/characters/character2_right/character_6-7.png",
-                "assets/characters/character2_right/character_7-7.png",
-                "assets/characters/character2_right/character_8-8.png"
-            ]
-            for pattern in right_patterns:
-                try:
-                    texture = arcade.load_texture(pattern)
-                    self.run_right_textures.append(texture)
-                except Exception as e:
-                    print(f"Could not load {pattern}: {e}")
-
-        except Exception as e:
-            print(f"Error loading character textures: {e}")
-
-        # Fallback if no textures loaded
-        if not self.idle_textures:
-            self.idle_textures = [arcade.make_soft_square_texture(32, arcade.color.BLUE, 255, 255)]
-        if not self.run_textures:
-            self.run_textures = self.idle_textures
-        if not self.run_left_textures:
-            self.run_left_textures = self.run_textures
-        if not self.run_right_textures:
-            self.run_right_textures = self.run_textures
-
-        # Set initial texture
-        self.texture = self.run_textures[0] if self.run_textures else self.idle_textures[0]
-        self.scale = CHARACTER_SCALE
-
-        # Animation state
-        self.current_frame = 0
-        self.frame_counter = 0
-        self.current_animation = "forward"  # forward, left, right
-
-        # Movement direction (in radians)
-        self.direction = 0  # 0 = right, pi/2 = up, pi = left, 3pi/2 = down
-
-        # Isometric position tracking
-        self.iso_x = 0
-        self.iso_y = 0
-
-        # Wave mode state
-        self.in_wave_mode = False
-
-    def update_animation(self, delta_time=1 / 60, turn_direction=0):
-        """Update character animation based on movement direction"""
-        self.frame_counter += 1
-
-        # Determine which animation to use based on turn direction
-        if turn_direction > 0:  # Turning left
-            target_animation = "left"
-            texture_list = self.run_left_textures
-        elif turn_direction < 0:  # Turning right
-            target_animation = "right"
-            texture_list = self.run_right_textures
-        else:  # Going straight
-            target_animation = "forward"
-            texture_list = self.run_textures
-
-        # Reset frame if animation changed
-        if target_animation != self.current_animation:
-            self.current_animation = target_animation
-            self.current_frame = 0
-            self.frame_counter = 0
-
-        # Change frame every 6 updates (faster animation for runner feel)
-        if self.frame_counter >= 6:
-            self.frame_counter = 0
-            if texture_list:
-                self.current_frame = (self.current_frame + 1) % len(texture_list)
-                self.texture = texture_list[self.current_frame]
-
-    def set_wave_mode(self, enabled):
-        """Toggle wave mode visual effect"""
-        self.in_wave_mode = enabled
-        if enabled:
-            self.alpha = WAVE_MODE_ALPHA
-        else:
-            self.alpha = 255
-
-
-def iso_to_screen(iso_x, iso_y):
-    """Convert isometric grid coordinates to screen coordinates"""
-    screen_x = (iso_x - iso_y) * (TILE_WIDTH / 2)
-    screen_y = (iso_x + iso_y) * (TILE_HEIGHT / 2)
-    return screen_x, screen_y
-
-
-def screen_to_chunk(screen_x, screen_y):
-    """Convert screen coordinates to chunk coordinates"""
-    tiles_per_chunk = CHUNK_SIZE
-    chunk_x = int(screen_x / (TILE_WIDTH * tiles_per_chunk / 2))
-    chunk_y = int(screen_y / (TILE_HEIGHT * tiles_per_chunk / 2))
-    return chunk_x, chunk_y
-
-
-def get_chunk_seed(chunk_x, chunk_y):
-    """Generate a unique seed for each chunk using activation function"""
-    center_x = chunk_x * CHUNK_SIZE + CHUNK_SIZE // 2
-    center_y = chunk_y * CHUNK_SIZE + CHUNK_SIZE // 2
-
-    combined = MASTER_SEED * math.sin(center_x * 0.1) * math.cos(center_y * 0.1)
-    combined += (center_x * 73856093) ^ (center_y * 19349663)
-
-    activated_seed = int(abs(combined * 1000) % (2 ** 31 - 1))
-    return activated_seed
-
-
-def get_hitbox_for_element(element):
-    """Get custom hitbox for specific elements with directional extensions"""
-    hitbox_width = TILE_WIDTH * 0.3
-    hitbox_height = TILE_HEIGHT * 0.3
-
-    # Trees need extended hitboxes towards the bottom (where trunk appears visually)
-    if 'tree' in element:
-        return [
-            (-hitbox_width * 0.45, -hitbox_height * 3.0),
-            (hitbox_width * 0.45, -hitbox_height * 3.0),
-            (hitbox_width * 0.45, hitbox_height * 0.8),
-            (-hitbox_width * 0.45, hitbox_height * 0.8)
-        ]
-
-    # Large rocks get slightly extended hitbox
-    elif element == 'stone_large':
-        return [
-            (-hitbox_width * 0.8, -hitbox_height * 1.2),
-            (hitbox_width * 0.8, -hitbox_height * 1.2),
-            (hitbox_width * 0.8, hitbox_height * 0.6),
-            (-hitbox_width * 0.8, hitbox_height * 0.6)
-        ]
-
-    # Logs and stumps
-    elif element in ['log', 'log_large']:
-        return [
-            (-hitbox_width * 0.9, -hitbox_height * 1.0),
-            (hitbox_width * 0.9, -hitbox_height * 1.0),
-            (hitbox_width * 0.9, hitbox_height * 0.5),
-            (-hitbox_width * 0.9, hitbox_height * 0.5)
-        ]
-
-    # Stone tall
-    elif element == 'stone_tall':
-        return [
-            (-hitbox_width * 0.6, -hitbox_height * 0.8),
-            (hitbox_width * 0.6, -hitbox_height * 0.8),
-            (hitbox_width * 0.6, hitbox_height * 0.4),
-            (-hitbox_width * 0.6, hitbox_height * 0.4)
-        ]
-
-    # Default hitbox
-    else:
-        return [
-            (-hitbox_width / 2, -hitbox_height / 2),
-            (hitbox_width / 2, -hitbox_height / 2),
-            (hitbox_width / 2, hitbox_height / 2),
-            (-hitbox_width / 2, hitbox_height / 2)
-        ]
-
-
-def has_collision(element_type):
-    """Determine if an element should have collision"""
-    collision_types = {
-        'tree_blocks_fall', 'tree_fat_fall', 'tree_thin_fall', 'tree_tall_fall',
-        'tree_default_fall', 'tree_oak_fall',
-        'stone_tall', 'stone_large', 'log', 'log_large'
-    }
-    return element_type in collision_types
+import random
+import arcade
+from math import pi, cos, sin
+
+from constants import *
+from character import Character
+from terrain_generation import hybrid_terrain
+from utils import (iso_to_screen, screen_to_chunk, get_chunk_seed,
+                   get_hitbox_for_element, has_collision)
 
 
 class ProceduralForestTerrain(arcade.Window):
@@ -447,7 +17,7 @@ class ProceduralForestTerrain(arcade.Window):
         super().__init__(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TITLE)
         arcade.set_background_color(arcade.color.SKY_BLUE)
 
-        # Camera setup - using modern Camera2D
+        # Camera setup
         self.camera = arcade.camera.Camera2D()
 
         # Scene to manage all sprites
@@ -456,7 +26,7 @@ class ProceduralForestTerrain(arcade.Window):
         # Load textures
         self.textures = {}
 
-        # Store active chunks {(chunk_x, chunk_y): chunk_data}
+        # Store active chunks
         self.chunks = {}
 
         # Character
@@ -465,10 +35,10 @@ class ProceduralForestTerrain(arcade.Window):
         # Physics engine
         self.physics_engine = None
 
-        # Turn direction: -1 for left, 1 for right, 0 for straight
+        # Turn direction
         self.turn_direction = 0
 
-        # Terrain generation mode: 'random' or 'quantum'
+        # Terrain generation mode
         self.terrain_mode = 'quantum'
 
         # Game state
@@ -482,7 +52,7 @@ class ProceduralForestTerrain(arcade.Window):
         # Quantum wave mode state
         self.wave_mode_active = False
         self.quantum_energy = MAX_QUANTUM_ENERGY
-        self.wave_particles = []  # Visual effect particles
+        self.wave_particles = []
 
         # Text objects for UI
         self.score_text = None
@@ -494,13 +64,13 @@ class ProceduralForestTerrain(arcade.Window):
         self.game_over_text = None
         self.final_score_text = None
         self.restart_text = None
-
         self.health_label = None
+
+        # Health
         self.health = MAX_HEALTH
         self.last_damage_time = 0
 
-        self.wave_mode_active = False
-
+        # Audio
         self.bg_ambient_music = None
         self.coin_music = None
         self.running_music = None
@@ -511,41 +81,28 @@ class ProceduralForestTerrain(arcade.Window):
     def load_textures(self):
         """Load all forest-themed textures"""
         try:
-            # Ground tiles
             self.textures['grass'] = arcade.load_texture("assets/terrain/ground_grass_NE.png")
-
-            # Trees (various types for variety)
             self.textures['tree_blocks_fall'] = arcade.load_texture("assets/terrain/tree_blocks_fall_NE.png")
             self.textures['tree_default_fall'] = arcade.load_texture("assets/terrain/tree_default_fall_NE.png")
             self.textures['tree_fat_fall'] = arcade.load_texture("assets/terrain/tree_fat_fall_NE.png")
             self.textures['tree_thin_fall'] = arcade.load_texture("assets/terrain/tree_thin_fall_NE.png")
             self.textures['tree_oak_fall'] = arcade.load_texture("assets/terrain/tree_oak_fall_NE.png")
-
-            # Rocks and details
             self.textures['stone_tall'] = arcade.load_texture("assets/terrain/stone_tallG_NE.png")
             self.textures['stone_large'] = arcade.load_texture("assets/terrain/stone_largeC_NE.png")
-
-            # Plants
             self.textures['bush_small'] = arcade.load_texture("assets/terrain/plant_bushSmall_NE.png")
-
-            # Logs
             self.textures['log'] = arcade.load_texture("assets/terrain/log_NE.png")
             self.textures['log_large'] = arcade.load_texture("assets/terrain/log_large_NE.png")
-
-            # Collectible coin
             self.textures['coin'] = arcade.load_texture("assets/terrain/skull-fotor-bg-remover-2025110325712.png")
-
         except Exception as e:
             print(f"Error loading textures: {e}")
-            # Create a fallback texture
             self.textures['grass'] = arcade.load_texture(":resources:images/tiles/grassCenter.png")
 
     def setup(self):
         """Set up initial scene, chunks and character"""
-        # Create the Scene with organized layers
         self.scene = arcade.Scene()
-
         self.load_textures()
+
+        # Load audio
         self.bg_ambient_music = arcade.load_sound("assets/music/bg.mp3")
         self.coin_music = arcade.load_sound("assets/music/coin_collect.mp3")
         self.running_music = arcade.load_sound("assets/music/running.mp3")
@@ -566,19 +123,17 @@ class ProceduralForestTerrain(arcade.Window):
         self.character.center_y = SCREEN_HEIGHT / 2
         self.character.iso_x = 0
         self.character.iso_y = 0
-        self.character.direction = pi / 4  # Start moving diagonally up-right
+        self.character.direction = pi / 4
 
-        # Store starting position for displacement calculation
         self.start_x = self.character.center_x
         self.start_y = self.character.center_y
 
-        # Add character to scene
         self.scene.add_sprite(LAYER_NAME_CHARACTERS, self.character)
 
         # Generate initial chunks
         self.update_chunks()
 
-        # Initialize physics engine with walls from scene
+        # Initialize physics engine
         self.physics_engine = arcade.PhysicsEngineSimple(
             self.character,
             self.scene[LAYER_NAME_WALLS]
@@ -592,7 +147,14 @@ class ProceduralForestTerrain(arcade.Window):
         self.wave_mode_active = False
         self.quantum_energy = MAX_QUANTUM_ENERGY
         self.wave_particles = []
+        self.health = MAX_HEALTH
+        self.last_damage_time = 0
 
+        # Initialize UI text objects
+        self._init_ui_text()
+
+    def _init_ui_text(self):
+        """Initialize all UI text objects"""
         self.score_text = arcade.Text(
             "Score: 0", 10, SCREEN_HEIGHT - 30,
             arcade.color.WHITE, 20, bold=True
@@ -658,13 +220,11 @@ class ProceduralForestTerrain(arcade.Window):
 
     def generate_terrain_element(self, tile_x, tile_y, rng):
         """Determine what terrain element to place at this position"""
-        # Use quantum terrain if enabled
         if self.terrain_mode == 'quantum':
-            return quantum_terrain(tile_x, tile_y)
+            return hybrid_terrain(tile_x, tile_y, self.wave_mode_active)
 
-        # Otherwise use random generation
+        # Random generation fallback
         noise = rng.random()
-
         if noise < 0.35:
             tree_type = rng.random()
             if tree_type < 0.3:
@@ -694,7 +254,6 @@ class ProceduralForestTerrain(arcade.Window):
         start_tile_x = chunk_x * CHUNK_SIZE
         start_tile_y = chunk_y * CHUNK_SIZE
 
-        # Store sprites for this chunk so we can remove them later
         chunk_sprites = {
             'ground': [],
             'objects': [],
@@ -719,7 +278,7 @@ class ProceduralForestTerrain(arcade.Window):
                 chunk_sprites['ground'].append(grass_sprite)
 
                 # Generate terrain element
-                element = hybrid_terrain(tile_x, tile_y, self.wave_mode_active)
+                element = self.generate_terrain_element(tile_x, tile_y, rng)
                 if element and element in self.textures:
                     detail_sprite = arcade.Sprite()
                     detail_sprite.texture = self.textures[element]
@@ -729,18 +288,15 @@ class ProceduralForestTerrain(arcade.Window):
                     detail_sprite.iso_x = tile_x
                     detail_sprite.iso_y = tile_y
 
-                    # Set up hitbox for collision objects
                     if has_collision(element):
                         hitbox_points = get_hitbox_for_element(element)
                         detail_sprite.hit_box = arcade.hitbox.HitBox(
                             hitbox_points,
                             position=(detail_sprite.center_x, detail_sprite.center_y)
                         )
-                        # Add to walls layer
                         self.scene.add_sprite(LAYER_NAME_WALLS, detail_sprite)
                         chunk_sprites['walls'].append(detail_sprite)
                     else:
-                        # Non-collision objects go to objects layer
                         self.scene.add_sprite(LAYER_NAME_OBJECTS, detail_sprite)
                         chunk_sprites['objects'].append(detail_sprite)
 
@@ -748,7 +304,7 @@ class ProceduralForestTerrain(arcade.Window):
                     coin_sprite = arcade.Sprite()
                     coin_sprite.texture = self.textures['coin']
                     coin_sprite.center_x = screen_x
-                    coin_sprite.center_y = screen_y + 10  # Slight elevation
+                    coin_sprite.center_y = screen_y + 10
                     coin_sprite.scale = 0.1
                     self.scene.add_sprite(LAYER_NAME_COINS, coin_sprite)
                     chunk_sprites['coins'].append(coin_sprite)
@@ -767,12 +323,8 @@ class ProceduralForestTerrain(arcade.Window):
             for dy in range(-RENDER_DISTANCE, RENDER_DISTANCE + 1):
                 chunks_needed.add((center_chunk_x + dx, center_chunk_y + dy))
 
-        # Remove chunks that are too far
-        chunks_to_remove = []
-        for chunk_pos in self.chunks.keys():
-            if chunk_pos not in chunks_needed:
-                chunks_to_remove.append(chunk_pos)
-
+        # Remove far chunks
+        chunks_to_remove = [pos for pos in self.chunks.keys() if pos not in chunks_needed]
         for chunk_pos in chunks_to_remove:
             del self.chunks[chunk_pos]
 
@@ -782,7 +334,7 @@ class ProceduralForestTerrain(arcade.Window):
                 self.chunks[chunk_pos] = self.create_chunk(*chunk_pos)
 
     def on_key_press(self, key, modifiers):
-        """Handle key press - only turn left or right"""
+        """Handle key press"""
         if self.game_over:
             if key == arcade.key.R:
                 self.setup()
@@ -793,18 +345,12 @@ class ProceduralForestTerrain(arcade.Window):
         elif key == arcade.key.RIGHT or key == arcade.key.D:
             self.turn_direction = 1
         elif key == arcade.key.W:
-            # Activate wave mode if we have energy
             if self.quantum_energy > 0:
                 self.wave_mode_active = True
                 self.character.set_wave_mode(True)
         elif key == arcade.key.Q:
-            # Toggle terrain generation mode
-            if self.terrain_mode == 'quantum':
-                self.terrain_mode = 'random'
-                print("Switched to Random Terrain Generation")
-            else:
-                self.terrain_mode = 'quantum'
-                print("Switched to Quantum Terrain Generation")
+            self.terrain_mode = 'random' if self.terrain_mode == 'quantum' else 'quantum'
+            print(f"Switched to {'Random' if self.terrain_mode == 'random' else 'Quantum'} Terrain Generation")
 
     def on_key_release(self, key, modifiers):
         """Handle key release"""
@@ -815,13 +361,11 @@ class ProceduralForestTerrain(arcade.Window):
             if self.turn_direction == 1:
                 self.turn_direction = 0
         elif key == arcade.key.W:
-            # Deactivate wave mode
             self.wave_mode_active = False
             self.character.set_wave_mode(False)
 
     def update_wave_particles(self):
         """Update quantum wave visual effect particles"""
-        # Add new particles when in wave mode
         if self.wave_mode_active and random.random() < 0.3:
             angle = random.uniform(0, 2 * pi)
             distance = random.uniform(10, 30)
@@ -838,34 +382,28 @@ class ProceduralForestTerrain(arcade.Window):
                 ])
             })
 
-        # Update and remove old particles
-        self.wave_particles = [
-            p for p in self.wave_particles
-            if p['life'] > 0
-        ]
+        self.wave_particles = [p for p in self.wave_particles if p['life'] > 0]
         for particle in self.wave_particles:
             particle['life'] -= 1
 
     def take_damage(self, amount: int):
-        """Reduce health, trigger Game Over if needed."""
+        """Reduce health, trigger Game Over if needed"""
         self.health = max(0, self.health - amount)
         self.last_damage_time = time.time()
 
         if self.health <= 0:
             self.game_over = True
             self.wave_mode_active = False
-            arcade.play_sound(self.game_over_sound) if hasattr(self, "game_over_sound") else None
 
     def on_update(self, delta_time):
         """Update camera position and character"""
         if self.game_over:
             return
 
-        # Decrement collision cooldown
         if self.collision_cooldown > 0:
             self.collision_cooldown -= 1
 
-        # Update quantum energy based on wave mode
+        # Update quantum energy
         if self.wave_mode_active:
             self.quantum_energy -= QUANTUM_DRAIN_RATE
             if self.quantum_energy <= 0:
@@ -873,67 +411,58 @@ class ProceduralForestTerrain(arcade.Window):
                 self.wave_mode_active = False
                 self.character.set_wave_mode(False)
         else:
-            self.quantum_energy = self.quantum_energy+ QUANTUM_RECHARGE_RATE if self.quantum_energy + QUANTUM_RECHARGE_RATE <= MAX_QUANTUM_ENERGY else MAX_QUANTUM_ENERGY
+            self.quantum_energy = min(self.quantum_energy + QUANTUM_RECHARGE_RATE, MAX_QUANTUM_ENERGY)
 
-        # Update wave particles
         self.update_wave_particles()
 
-        # Update character direction based on turn input
+        # Update character direction
         if self.turn_direction != 0:
             self.character.direction += self.turn_direction * TURN_SPEED
 
-        # Always move forward in current direction
+        # Move forward
         self.character.change_x = math.cos(self.character.direction) * CHARACTER_SPEED
         self.character.change_y = math.sin(self.character.direction) * CHARACTER_SPEED
 
-        # Store old position
         old_x = self.character.center_x
         old_y = self.character.center_y
 
-        # Update physics for player (only if NOT in wave mode)
+        # Update physics
         if not self.wave_mode_active:
             self.physics_engine.update()
         else:
-            # In wave mode, move freely without collision
             self.character.center_x += self.character.change_x
             self.character.center_y += self.character.change_y
 
-        # Check if character hit something (didn't move as expected) - only when not in wave mode
+        # Check collision
         if not self.wave_mode_active:
             actual_move_x = self.character.center_x - old_x
             actual_move_y = self.character.center_y - old_y
 
-            # If movement was blocked significantly, register collision
             if abs(actual_move_x) < abs(self.character.change_x) * 0.5 or \
                     abs(actual_move_y) < abs(self.character.change_y) * 0.5:
-
-                # Only deduct points if cooldown has expired
                 if self.collision_cooldown == 0:
                     self.penalty -= COLLISION_PENALTY
                     self.collision_cooldown = COLLISION_COOLDOWN
-                self.take_damage(HEALTH_PENALTY)
+                    self.take_damage(HEALTH_PENALTY)
 
-        # Calculate movement delta for camera
-        move_x = self.character.center_x - old_x
-        move_y = self.character.center_y - old_y
-
-        # Calculate displacement from start (straight-line distance)
+        # Calculate displacement
         displacement = math.sqrt(
             (self.character.center_x - self.start_x) ** 2 +
             (self.character.center_y - self.start_y) ** 2
         )
 
-        # Update score based on displacement
         self.score = int(displacement) + self.penalty
 
-        # Update camera to follow character
+        # Update camera
+        move_x = self.character.center_x - old_x
+        move_y = self.character.center_y - old_y
         current_pos = self.camera.position
         self.camera.position = (current_pos[0] + move_x, current_pos[1] + move_y)
         self.update_chunks()
 
-        # Update animations
         self.character.update_animation(delta_time, self.turn_direction)
 
+        # Coin collection
         coin_hits = arcade.check_for_collision_with_list(
             self.character,
             self.scene[LAYER_NAME_COINS]
@@ -944,24 +473,19 @@ class ProceduralForestTerrain(arcade.Window):
             self.score += COIN_VALUE
 
     def on_draw(self):
-        """Render the screen with proper layering"""
+        """Render the screen"""
         self.clear()
-
         self.camera.use()
 
-        # Draw ground layer (no sorting needed)
+        # Draw layers
         self.scene[LAYER_NAME_GROUND].draw()
-
-        # Draw static objects that don't need frequent re-sorting
         self.scene[LAYER_NAME_OBJECTS].draw()
 
-        # Only sort walls and characters for proper depth
+        # Sort dynamic objects
         dynamic_objects = []
         dynamic_objects.extend(self.scene[LAYER_NAME_WALLS])
         dynamic_objects.extend(self.scene[LAYER_NAME_COINS])
         dynamic_objects.extend(self.scene[LAYER_NAME_CHARACTERS])
-
-        # Sort by Y position
         dynamic_objects.sort(key=lambda s: -s.center_y)
 
         sprite_list = arcade.SpriteList(use_spatial_hash=True)
@@ -979,29 +503,33 @@ class ProceduralForestTerrain(arcade.Window):
                 color
             )
 
-        # Draw UI (score and instructions)
-        arcade.camera.Camera2D().use()  # Switch to screen coordinates
+        # Draw UI
+        arcade.camera.Camera2D().use()
 
-        # Calculate current displacement
         displacement = math.sqrt(
             (self.character.center_x - self.start_x) ** 2 +
             (self.character.center_y - self.start_y) ** 2
         )
 
-        # Draw quantum energy bar
+        # Draw energy bar
+        self._draw_energy_bar()
+
+        # Update and draw text
+        self._update_and_draw_ui()
+
+    def _draw_energy_bar(self):
+        """Draw the quantum energy bar"""
         bar_width = 200
         bar_height = 20
         bar_x = 10
         bar_y = SCREEN_HEIGHT - 120
 
-        # Background
         arcade.draw_lbwh_rectangle_filled(
             bar_x, bar_y + bar_height / 2,
             bar_width, bar_height,
             arcade.color.DARK_GRAY
         )
 
-        # Energy level
         energy_width = (self.quantum_energy / MAX_QUANTUM_ENERGY) * bar_width
         energy_color = arcade.color.CYAN if self.quantum_energy > 20 else arcade.color.RED
         arcade.draw_lbwh_rectangle_filled(
@@ -1010,35 +538,36 @@ class ProceduralForestTerrain(arcade.Window):
             energy_color
         )
 
-        # Border
         arcade.draw_lbwh_rectangle_outline(
             bar_x, bar_y + bar_height / 2,
             bar_width, bar_height,
             arcade.color.WHITE, 2
         )
 
-        # Update dynamic UI text
+    def _update_and_draw_ui(self):
+        """Update and draw all UI text elements"""
+        displacement = math.sqrt(
+            (self.character.center_x - self.start_x) ** 2 +
+            (self.character.center_y - self.start_y) ** 2
+        )
+
         self.score_text.text = f"Score: {self.score}"
-        self.displacement_text.text = f"Displacement: {int(math.sqrt((self.character.center_x - self.start_x) ** 2 + (self.character.center_y - self.start_y) ** 2))}"
+        self.displacement_text.text = f"Displacement: {int(displacement)}"
         self.energy_label.text = f"Quantum Energy: {int(self.quantum_energy)}%"
         self.energy_label.color = arcade.color.YELLOW if self.wave_mode_active else arcade.color.CYAN
 
-        # Health text
         self.health_label.text = f"Health: {int(self.health)}%"
-        # Flash red when hurt
         if time.time() - self.last_damage_time < 0.3:
             self.health_label.color = arcade.color.RED
         else:
             self.health_label.color = arcade.color.LIGHT_GREEN
-        self.health_label.draw()
 
-        # Draw text objects
         self.score_text.draw()
         self.displacement_text.draw()
         self.energy_label.draw()
         self.controls_text.draw()
+        self.health_label.draw()
 
-        # Conditional UI
         if self.collision_cooldown > 0:
             self.collision_text.draw()
 
